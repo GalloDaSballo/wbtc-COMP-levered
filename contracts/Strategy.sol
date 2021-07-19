@@ -20,13 +20,16 @@ import {
 // Import interfaces for many popular DeFi projects, or add your own!
 //import "../interfaces/<protocol>/<Interface>.sol";
 import {ICToken} from "../interfaces/compound/ICToken.sol";
+import {IComptroller} from "../interfaces/compound/IComptroller.sol";
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
 
-    address public cToken = 0xC11b1268C1A384e55C48c2391d8d480264A3A7F4;
+    address public constant comp = 0xc00e94Cb662C3520282E6f5717214004A7f26888;
+    address public constant cToken = 0xC11b1268C1A384e55C48c2391d8d480264A3A7F4;
+    address public constant comptroller = 0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b;
 
     constructor(address _vault) public BaseStrategy(_vault) {
         // You can set these parameters on deployment to whatever you want
@@ -36,6 +39,11 @@ contract Strategy is BaseStrategy {
 
         // One off approvals
         IERC20(cToken).safeApprove(address(want), type(uint256).max);
+
+        // Enter market to borrow and deposit
+        address[] memory cTokens = new address[](1);
+        cTokens[0] = cToken;
+        IComptroller(comptroller).enterMarkets(cTokens);
     }
 
     // ******** OVERRIDE THESE METHODS FROM BASE CONTRACT ************
@@ -66,12 +74,19 @@ contract Strategy is BaseStrategy {
         // NOTE: Should try to free up at least `_debtOutstanding` of underlying position
 
         // Claim Comp
+        IComptroller(comptroller).claimComp();
 
-        // Repay Debt
 
         // Swap to want
+        _swapToWant(toSwap); // TODO         uint256 toSwap = IERC20(comp).balanceOf(address(this));
+        
+
+        // Repay Debt
+        _repayDebt()
+
 
         // Return stuff
+        // Remaining want, to be used for other stuff
     }
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
