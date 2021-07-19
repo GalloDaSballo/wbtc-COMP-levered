@@ -19,29 +19,37 @@ import {
 
 // Import interfaces for many popular DeFi projects, or add your own!
 //import "../interfaces/<protocol>/<Interface>.sol";
+import {ICToken} from "../interfaces/compound/ICToken.sol";
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
 
+    address public cToken = 0xC11b1268C1A384e55C48c2391d8d480264A3A7F4;
+
     constructor(address _vault) public BaseStrategy(_vault) {
         // You can set these parameters on deployment to whatever you want
         // maxReportDelay = 6300;
         // profitFactor = 100;
         // debtThreshold = 0;
+
+        // One off approvals
+        IERC20(cToken).safeApprove(address(want), type(uint256).max);
     }
 
     // ******** OVERRIDE THESE METHODS FROM BASE CONTRACT ************
 
     function name() external view override returns (string memory) {
         // Add your own name here, suggestion e.g. "StrategyCreamYFI"
-        return "Strategy<ProtocolName><TokenType>";
+        return "bStrategyLeveraged-COMP-wBTC-farm";
     }
 
     function estimatedTotalAssets() public view override returns (uint256) {
         // TODO: Build a more accurate estimate using the value of all positions in terms of `want`
-        return want.balanceOf(address(this));
+        return want.balanceOf(address(this))
+            .add(ICToken(cToken).balanceOfUnderlying(address(this))
+            .sub(ICToken(cToken).borrowBalanceCurrent(address(this))));
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -61,6 +69,18 @@ contract Strategy is BaseStrategy {
     function adjustPosition(uint256 _debtOutstanding) internal override {
         // TODO: Do something to invest excess `want` tokens (from the Vault) into your positions
         // NOTE: Try to adjust positions so that `_debtOutstanding` can be freed up on *next* harvest (not immediately)
+
+        uint256 available = want.balanceOf(address(this));
+
+        if(available > _debtOutstanding) {
+            // Invest above debt
+            ICToken(cToken).mint(available.sub(_debtOutstanding));
+        }
+
+        if(_debtOutstanding > available) {
+            // Withdraw a little so it can be sent back next harvest
+            ICToken(cToken).redeemUnderlying(_debtOutstanding.sub(available));
+        }
     }
 
     function liquidatePosition(uint256 _amountNeeded)
@@ -71,6 +91,12 @@ contract Strategy is BaseStrategy {
         // TODO: Do stuff here to free up to `_amountNeeded` from all positions back into `want`
         // NOTE: Maintain invariant `want.balanceOf(this) >= _liquidatedAmount`
         // NOTE: Maintain invariant `_liquidatedAmount + _loss <= _amountNeeded`
+        uint256 available = want.balanceOf(address(this));
+
+        if (_amountNeeded > available) {
+            // TODO: what if you try to withdraw too much?
+            ICToken(cToken).redeemUnderlying(_amountNeeded.sub(available));
+        }
 
         uint256 totalAssets = want.balanceOf(address(this));
         if (_amountNeeded > totalAssets) {
@@ -82,7 +108,9 @@ contract Strategy is BaseStrategy {
     }
 
     function liquidateAllPositions() internal override returns (uint256) {
-        // TODO: Liquidate all positions and return the amount freed.
+        // Redeem all
+        ICToken(cToken).redeemUnderlying(ICToken(cToken).balanceOfUnderlying(address(this)));
+
         return want.balanceOf(address(this));
     }
 
